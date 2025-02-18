@@ -143,26 +143,36 @@ def generate_blog_from_transcription(transcription):
     
     1. Use <h1> tags for the main title
     2. Use <h2> tags for section headings
-    3. Use <strong> or <b> tags for bold text
+    3. Use <strong> tags for bold text (do not use markdown ** symbols)
     4. Wrap paragraphs in <p> tags
     5. Throughout the content:
-       - Make important key points bold
-       - Emphasize significant statistics and numbers in bold
-       - Highlight crucial phrases and main takeaways in bold
-       - Make names, dates, and key concepts stand out in bold
+       - Make important key points bold using <strong> tags
+       - Emphasize significant statistics and numbers using <strong> tags
+       - Highlight crucial phrases and main takeaways using <strong> tags
+       - Make names, dates, and key concepts stand out using <strong> tags
     
-    IMPORTANT: Do not include any code block markers (like ``` or '''). Start directly with the HTML content.
+    IMPORTANT: 
+    - Do not use markdown symbols like * or ** for formatting
+    - Do not use # for headings
+    - Use only HTML tags for all formatting
+    - Start directly with the <h1> tag
     
     Here's the transcript:
     
     {transcription}
     
-    Generate the blog article with HTML formatting, starting directly with the <h1> tag:"""
+    Generate the blog article with HTML formatting:"""
     
     try:
         response = model.generate_content(prompt)
-        # Clean up any remaining markers just in case
         content = response.text.strip()
+        
+        # Clean up any markdown that might have slipped through
+        content = content.replace('**', '')  # Remove bold markdown
+        content = content.replace('*', '')   # Remove any single asterisks
+        content = content.replace('#', '')   # Remove any heading markers
+        
+        # Remove any code block markers
         if content.startswith("```html"):
             content = content[7:]
         if content.startswith("'''html"):
@@ -171,6 +181,7 @@ def generate_blog_from_transcription(transcription):
             content = content[:-3]
         if content.endswith("'''"):
             content = content[:-3]
+        
         return content.strip()
     except Exception as e:
         logging.error(f"Error generating blog content: {str(e)}")
