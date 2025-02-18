@@ -132,7 +132,6 @@ def generate_blog_from_transcription(transcription):
     
     generation_config = {
         "temperature": 0.7,
-        "max_output_tokens": 500,
         "top_p": 0.8,
         "top_k": 40
     }
@@ -140,16 +139,39 @@ def generate_blog_from_transcription(transcription):
     model.generation_config = generation_config
     
     prompt = f"""Based on the following transcript from a YouTube video, 
-    write a comprehensive blog article, write it based on the transcript, 
-    but dont make it look like a youtube video, make it look like a proper blog article:
+    write a comprehensive blog article. Format it using HTML tags as follows:
+    
+    1. Use <h1> tags for the main title
+    2. Use <h2> tags for section headings
+    3. Use <strong> or <b> tags for bold text
+    4. Wrap paragraphs in <p> tags
+    5. Throughout the content:
+       - Make important key points bold
+       - Emphasize significant statistics and numbers in bold
+       - Highlight crucial phrases and main takeaways in bold
+       - Make names, dates, and key concepts stand out in bold
+    
+    IMPORTANT: Do not include any code block markers (like ``` or '''). Start directly with the HTML content.
+    
+    Here's the transcript:
     
     {transcription}
     
-    Article:"""
+    Generate the blog article with HTML formatting, starting directly with the <h1> tag:"""
     
     try:
         response = model.generate_content(prompt)
-        return response.text
+        # Clean up any remaining markers just in case
+        content = response.text.strip()
+        if content.startswith("```html"):
+            content = content[7:]
+        if content.startswith("'''html"):
+            content = content[7:]
+        if content.endswith("```"):
+            content = content[:-3]
+        if content.endswith("'''"):
+            content = content[:-3]
+        return content.strip()
     except Exception as e:
         logging.error(f"Error generating blog content: {str(e)}")
         raise
