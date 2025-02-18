@@ -9,4 +9,6 @@ urlpatterns = [
     path('generate-blog', views.generate_blog, name='generate-blog'),
     path('blog-list', views.blog_list, name='blog-list'),
     path('blog-details/<int:pk>/', views.blog_details, name='blog-details'),
+    path('forgot-password/', views.forgot_password, name='forgot_password'),
+    path('reset-password/<str:token>/', views.reset_password, name='reset_password'),
 ]

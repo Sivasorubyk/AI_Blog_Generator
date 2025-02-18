@@ -18,6 +18,8 @@ from google.generativeai import GenerativeModel
 import uuid
 from pathlib import Path
 from .models import BlogPost
+from django.core.mail import send_mail
+from django.utils.crypto import get_random_string
 
 # Create your views here.
 @login_required
@@ -165,19 +167,23 @@ def blog_details(request, pk):
 
 def user_login(request):
     if request.method == 'POST':
-        username = request.POST['username']
+        email = request.POST['email']
         password = request.POST['password']
          
-        user = authenticate(request, username=username, password=password)
-        if user is not None:
-            login(request, user)
-            return redirect('/')
-        else:
-            error_message = 'Invalid credentials'
+        try:
+            user = User.objects.get(email=email)
+            user = authenticate(request, username=user.username, password=password)
+            if user is not None:
+                login(request, user)
+                return redirect('/')
+            else:
+                error_message = 'Invalid credentials'
+                return render(request, 'login.html', {'error_message': error_message})
+        except User.DoesNotExist:
+            error_message = 'No account found with this email'
             return render(request, 'login.html', {'error_message': error_message})
         
     return render(request, 'login.html')
-
 
 def user_signup(request):
     if request.method == 'POST':
@@ -185,18 +191,28 @@ def user_signup(request):
         email = request.POST['email']
         password = request.POST['password']
         repeat_password = request.POST['repeatPassword']
+        
         if password == repeat_password:
+            if User.objects.filter(email=email).exists():
+                error_message = 'An account with this email already exists'
+                return render(request, 'signup.html', {'error_message': error_message})
+            
             try:
-                user = User.objects.create_user(username, email, password)
+                user = User.objects.create_user(
+                    username=username,
+                    email=email,
+                    password=password
+                )
                 user.save()
                 login(request, user)
                 return redirect('/')
-            except:
+            except Exception as e:
                 error_message = 'Error creating account'
                 return render(request, 'signup.html', {'error_message': error_message})
         else:
             error_message = 'Passwords do not match'
             return render(request, 'signup.html', {'error_message': error_message})
+            
     return render(request, 'signup.html')
 
 def user_logout(request):
@@ -221,3 +237,62 @@ def get_youtube_video(link, max_retries=3):
                 time.sleep(2 ** attempt)
                 continue
             raise
+
+def forgot_password(request):
+    if request.method == 'POST':
+        email = request.POST.get('email')
+        try:
+            user = User.objects.get(email=email)
+            # Generate token
+            token = get_random_string(32)
+            # Save token to user (you might want to create a separate model for this)
+            user.profile.reset_token = token
+            user.profile.save()
+            
+            # Create reset link
+            reset_link = f"{request.scheme}://{request.get_host()}/reset-password/{token}"
+            
+            # Send email
+            send_mail(
+                'Reset Your Password',
+                f'Click the following link to reset your password: {reset_link}',
+                settings.DEFAULT_FROM_EMAIL,
+                [email],
+                fail_silently=False,
+            )
+            
+            return render(request, 'forgot-password.html', {
+                'success_message': 'Password reset instructions have been sent to your email.'
+            })
+            
+        except User.DoesNotExist:
+            return render(request, 'forgot-password.html', {
+                'error_message': 'No account found with this email address.'
+            })
+            
+    return render(request, 'forgot-password.html')
+
+def reset_password(request, token):
+    try:
+        user = User.objects.get(profile__reset_token=token)
+        
+        if request.method == 'POST':
+            password = request.POST.get('password')
+            confirm_password = request.POST.get('confirm_password')
+            
+            if password != confirm_password:
+                return render(request, 'reset-password.html', {
+                    'error_message': 'Passwords do not match.'
+                })
+                
+            user.set_password(password)
+            user.profile.reset_token = None
+            user.profile.save()
+            user.save()
+            
+            return redirect('login')
+            
+        return render(request, 'reset-password.html')
+        
+    except User.DoesNotExist:
+        return redirect('login')
