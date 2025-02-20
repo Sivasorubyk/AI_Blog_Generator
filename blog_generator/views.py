@@ -35,30 +35,62 @@ def generate_blog(request):
         except (KeyError, json.JSONDecodeError):
             return JsonResponse({'error': 'Invalid data sent'}, status=400)
 
-        # get yt title
-        title = yt_title(yt_link)
+        try:
+            # Start with getting the title
+            title = yt_title(yt_link)
+            
+            # Return an initial response to keep the connection alive
+            response = JsonResponse({
+                'status': 'processing',
+                'message': 'Starting download and transcription...',
+                'title': title
+            })
+            response['X-Accel-Buffering'] = 'no'
+            
+            # Get transcript with progress updates
+            try:
+                transcription = get_transcription(yt_link)
+                if not transcription:
+                    return JsonResponse({'error': "Failed to get transcript"}, status=500)
+            except Exception as e:
+                logging.error(f"Transcription failed: {str(e)}")
+                return JsonResponse({
+                    'error': "Transcription failed. Please try again with a shorter video or contact support."
+                }, status=500)
 
-        # get transcript
-        transcription = get_transcription(yt_link)
-        if not transcription:
-            return JsonResponse({'error': "Failed to get transcript"}, status=500)
+            # Generate blog content
+            try:
+                blog_content = generate_blog_from_transcription(transcription)
+                if not blog_content:
+                    return JsonResponse({'error': "Failed to generate blog article"}, status=500)
+            except Exception as e:
+                logging.error(f"Blog generation failed: {str(e)}")
+                return JsonResponse({
+                    'error': "Failed to generate blog content. Please try again."
+                }, status=500)
 
-        # use OpenAI to generate the blog
-        blog_content = generate_blog_from_transcription(transcription)
-        if not blog_content:
-            return JsonResponse({'error': "Failed to generate blog article"}, status=500)
+            # Save blog article
+            try:
+                new_blog_article = BlogPost.objects.create(
+                    user=request.user,
+                    youtube_title=title,
+                    youtube_link=yt_link,
+                    generated_content=blog_content
+                )
+                new_blog_article.save()
+            except Exception as e:
+                logging.error(f"Failed to save blog: {str(e)}")
+                return JsonResponse({
+                    'error': "Failed to save blog article. Please try again."
+                }, status=500)
 
-        # save blog article to database
-        new_blog_article = BlogPost.objects.create(
-            user=request.user,
-            youtube_title=title,
-            youtube_link=yt_link,
-            generated_content=blog_content
-        )
-        new_blog_article.save()
-
-        # return blog article as a response
-        return JsonResponse({'content': blog_content})
+            return JsonResponse({'content': blog_content, 'title': title})
+            
+        except Exception as e:
+            logging.error(f"Error in generate_blog: {str(e)}")
+            return JsonResponse({
+                'error': "An unexpected error occurred. Please try again."
+            }, status=500)
     else:
         return JsonResponse({'error': 'Invalid request method'}, status=405)
 
@@ -88,6 +120,12 @@ def download_audio(link):
         }],
         'outtmpl': str(output_path.with_suffix('')),
         'quiet': True,
+        # Add options for large file handling
+        'buffersize': 1024 * 1024,  # 1MB buffer size
+        'socket_timeout': 300,  # 5 minutes timeout
+        'retries': 10,  # Number of retries
+        'fragment_retries': 10,
+        'continuedl': True,  # Continue partial downloads
     }
     
     try:
@@ -105,15 +143,53 @@ def download_audio(link):
 
 def get_transcription(link):
     audio_path = None
+    max_retries = 3
+
     try:
         audio_path = Path(download_audio(link))
         if not audio_path.exists():
             raise FileNotFoundError("Audio file not found")
             
-        aai.settings.api_key = "429145d654184b7f83786ec239f4b099"
+        aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
         transcriber = aai.Transcriber()
-        transcript = transcriber.transcribe(str(audio_path))
-        return transcript.text
+
+        # Enhanced configuration for better transcription
+        config = aai.TranscriptionConfig(
+            language_detection=True,
+            punctuate=True,
+            format_text=True,
+            content_safety=False,
+            webhook_url=None,
+            speaker_labels=False,
+            auto_chapters=True,  # Enable auto-chapters for better segmentation
+            entity_detection=True  # Better entity recognition
+        )
+
+        for attempt in range(max_retries):
+            try:
+                transcript = transcriber.transcribe(
+                    str(audio_path),
+                    config=config
+                )
+                
+                while transcript.status != 'completed':
+                    if transcript.status == 'error':
+                        raise Exception(f"Transcription failed: {transcript.error}")
+                    time.sleep(5)
+                    transcript = transcriber.get_transcript(transcript.id)
+
+                # Verify the transcription is complete and ends with proper punctuation
+                text = transcript.text.strip()
+                if not text.endswith(('.', '!', '?')):
+                    text += '.'
+                
+                return text
+
+            except Exception as e:
+                logging.error(f"Transcription attempt {attempt + 1} failed: {str(e)}")
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(2 ** attempt)
         
     except Exception as e:
         logging.error(f"Transcription error: {str(e)}")
@@ -126,14 +202,16 @@ def get_transcription(link):
                 pass
 
 def generate_blog_from_transcription(transcription):
-    genai.configure(api_key="AIzaSyA2Rn_VSFSO0x7D3gVTaicM5xvckKvcxz4")
+    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
     
     model = GenerativeModel('gemini-pro')
     
+    # Adjusted generation config for more complete and coherent output
     generation_config = {
         "temperature": 0.7,
         "top_p": 0.8,
-        "top_k": 40
+        "top_k": 40,
+        "max_output_tokens": 8192  # Ensure we get a complete response
     }
     
     model.generation_config = generation_config
@@ -152,10 +230,15 @@ def generate_blog_from_transcription(transcription):
        - Make names, dates, and key concepts stand out using <strong> tags
     
     IMPORTANT: 
+    - Ensure all sentences are complete
+    - Cover all main points from the transcript
+    - Each section should have a proper conclusion
+    - The article should have a clear introduction and conclusion
     - Do not use markdown symbols like * or ** for formatting
     - Do not use # for headings
     - Use only HTML tags for all formatting
     - Start directly with the <h1> tag
+    - End with a proper concluding paragraph
     
     Here's the transcript:
     
@@ -167,20 +250,22 @@ def generate_blog_from_transcription(transcription):
         response = model.generate_content(prompt)
         content = response.text.strip()
         
-        # Clean up any markdown that might have slipped through
-        content = content.replace('**', '')  # Remove bold markdown
-        content = content.replace('*', '')   # Remove any single asterisks
-        content = content.replace('#', '')   # Remove any heading markers
+        # Clean up formatting
+        content = content.replace('**', '')
+        content = content.replace('*', '')
+        content = content.replace('#', '')
         
-        # Remove any code block markers
-        if content.startswith("```html"):
-            content = content[7:]
-        if content.startswith("'''html"):
-            content = content[7:]
-        if content.endswith("```"):
-            content = content[:-3]
-        if content.endswith("'''"):
-            content = content[:-3]
+        # Remove code block markers
+        content = content.replace('```html', '').replace('```', '')
+        content = content.replace("'''html", '').replace("'''", '')
+        
+        # Ensure content ends with proper HTML closure
+        if not content.lower().endswith('</p>'):
+            last_paragraph = content.split('</p>')[-1].strip()
+            if last_paragraph:
+                if not last_paragraph.endswith('.'):
+                    last_paragraph += '.'
+                content = content.rstrip() + '</p>'
         
         return content.strip()
     except Exception as e:

@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 from pathlib import Path
 import os
+from dotenv import load_dotenv
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -21,13 +22,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
+# Load environment variables
+load_dotenv()
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-caip^i+2q-g*s1l89o=7%6m=8fj!c4p=vqahwm=_e_devvsi7n'
+SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = ['*']  # Allows all hosts (not recommended for production)
+ALLOWED_HOSTS = ['*'] if DEBUG else ['your-domain.com']  # Modify for production
 
 
 # Application definition
@@ -149,9 +153,13 @@ LOGIN_URL = '/login'
 
 # Email settings
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'  # Or your email provider's SMTP server
+EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'sivasorubyk@gmail.com'
-EMAIL_HOST_PASSWORD = 'njdr ybxc qmha xovl'  # Use app-specific password for Gmail
-DEFAULT_FROM_EMAIL = 'sivasorubyk@gmail.com'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL')
+
+# API Keys
+ASSEMBLYAI_API_KEY = os.getenv('ASSEMBLYAI_API_KEY')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
